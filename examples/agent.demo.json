@@ -1,0 +1,20 @@
+{
+  "server": "http://127.0.0.1:8500",
+  "deregister_on_exit": true,
+  "services": [
+    {
+      "ns": "default",
+      "service": "testtest",
+      "id": "",
+      "address": "127.0.0.1",
+      "port": 8080,
+      "tags": ["v1", "blue"],
+      "meta": {"zone": "az1"},
+      "checks": [
+        {"Type": "ttl",  "TTL": "15s"},
+        {"Type": "http", "Path": "http://127.0.0.1:8080/health", "Interval": "5s", "Timeout": "2s"},
+        {"Type": "tcp",  "Path": "127.0.0.1:8080", "Interval": "5s", "Timeout": "2s"}
+      ]
+    }
+  ]
+}

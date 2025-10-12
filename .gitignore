@@ -1,0 +1,10 @@
+# Go
+bin/
+*.exe
+*.test
+*.out
+*.log
+.coverage*
+.idea/
+.vscode/
+.gocache/
