@@ -16,9 +16,11 @@ import (
 
 // HTTPServer 暴露 M1 阶段的最小 API 面。
 type HTTPServer struct {
-    Reg  registry.Registry
-    Addr string
-    srv  *http.Server
+    Reg      registry.Registry
+    Addr     string
+    srv      *http.Server
+    Joiner   Joiner // 可选：用于集群加入
+    IsLeader func() bool
 }
 
 func (h *HTTPServer) Start(ctx context.Context) error {
@@ -31,8 +33,15 @@ func (h *HTTPServer) Start(ctx context.Context) error {
     mux.HandleFunc("/v1/agent/check/fail/", h.handleCheckFail)
     mux.HandleFunc("/v1/catalog/services", h.handleCatalogServices)
     mux.HandleFunc("/v1/health/service/", h.handleHealthService)
+    mux.HandleFunc("/v1/raft/join", h.handleRaftJoin)
 
-    h.srv = &http.Server{Addr: h.Addr, Handler: logRequests(mux)}
+    h.srv = &http.Server{
+        Addr:         h.Addr,
+        Handler:      logRequests(mux),
+        ReadTimeout:  10 * time.Second,
+        WriteTimeout: 15 * time.Second,
+        IdleTimeout:  60 * time.Second,
+    }
 
     go func() {
         <-ctx.Done()
@@ -238,6 +247,29 @@ func (h *HTTPServer) handleHealthService(w http.ResponseWriter, r *http.Request)
     w.Header().Set("X-Index", fmt.Sprintf("%d", idx))
     w.Header().Set("Content-Type", "application/json")
     _ = json.NewEncoder(w).Encode(views)
+}
+
+// --- 集群管理：加入 ---
+type Joiner interface { Join(nodeID, addr string) error }
+
+func (h *HTTPServer) handleRaftJoin(w http.ResponseWriter, r *http.Request) {
+    if h.Joiner == nil { http.Error(w, "raft not enabled", http.StatusNotImplemented); return }
+    if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+    if h.IsLeader != nil && !h.IsLeader() {
+        http.Error(w, "not leader", http.StatusBadRequest)
+        return
+    }
+    var req struct{ ID, Addr string }
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "bad request", http.StatusBadRequest)
+        return
+    }
+    if req.ID == "" || req.Addr == "" { http.Error(w, "missing id/addr", http.StatusBadRequest); return }
+    if err := h.Joiner.Join(req.ID, req.Addr); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    w.WriteHeader(http.StatusOK)
 }
 
 func convertCheckDefs(defs []CheckDef) ([]registry.CheckSpec, error) {
